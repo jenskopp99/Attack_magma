@@ -1,0 +1,339 @@
+// Define functions
+
+function Schur(A,B,F)
+    // This function computes the Schur product
+    // Input: generator matrices A, B of some codes and the base field F
+    // Output: generator matrix H of the Schur product
+    n:=Ncols(A);
+    k_1:=Nrows(A);
+    k_2:=Nrows(B);
+    l:=1;
+        d:=k_1*k_2;
+        H:=ZeroMatrix(F,d,n);
+        for i in {1..k_1} do
+            for j in {1..k_2} do
+                g_i:=Vector(RowSubmatrix(A,i,1));
+                g_j:=Vector(RowSubmatrix(B,j,1));
+                g:=g_i*g_j;
+                H[l]:=g;
+                l:=l+1;
+            end for;
+        end for;
+    H:=EchelonForm(H);
+    RemoveZeroRows(~H);
+    return H;
+end function;
+
+function find_B1(G,F)
+    // Finds the linear code B1
+    // Input: a generator matrix G and base field F
+    // Output: the linear code D
+    k_1:=Nrows(G);
+    n:=Ncols(G);
+    B:=G;
+    for i in {1..k_1} do
+        if G[i,1] ne 0 then
+            B[i]:=Vector(ZeroMatrix(F,1,n));
+        end if;
+    end for;
+    RemoveZeroRows(~B);
+    D:=LinearCode(B);
+    return D;
+end function;
+
+function ECP(G,F,t)
+    // Computes the linear codes B_(t+g) and B_(t+g+1)
+    // Input: generator matrix G, error correcting capacity t, base field F
+    // Output: the linear codes B_minus, B_s
+    G_2:=Schur(G,G,F);
+    k_1:=Nrows(G);
+    k_2:=Nrows(G_2);
+    n:=Ncols(G);
+    m:=k_2-k_1;
+    g:=k_2-2*k_1+1;
+    B_0:=LinearCode(G);
+    B_1:=find_B1(G,F);
+    B_minus:=B_0;
+    B_s:=B_1;
+    V:=VectorSpace(F,n);
+    for s in {2..(t+g+1)} do
+        G_s:=GeneratorMatrix(B_s);
+        G_minus:=GeneratorMatrix(B_minus);
+        G_s2:=Schur(G_s,G_s,F);
+        B_s2:=LinearCode(G_s2);
+        H_s2:=ParityCheckMatrix(B_s2);
+        W:=VectorSpace(B_s);
+        for j in {1..(Nrows(G_minus))} do
+            b:=DiagonalMatrix(F,ElementToSequence(G_minus[j]));
+            K:=b*(Transpose(H_s2));
+            L:=Kernel(K);
+            W:=W meet L;
+        end for;
+        B_minus:=B_s;
+        J:=Matrix(Basis(W));
+        B_s:=LinearCode(J);
+    end for;
+    return B_minus, B_s;
+end function;
+
+function ECP_alt_aux(F, G, B_s_half, B_splus1_half)
+    // This is an auxiliary function that executes the inductive step in ECP_alt
+    // Input: base field F, generator matrix G,
+    // B_s_half, B_splus_half the linear codes needed to proceed inductively
+    // Output: the next linear code B_s
+    G_s_half:=GeneratorMatrix(B_s_half);
+    G_splus1_half:=GeneratorMatrix(B_splus1_half);
+    G_Schur:=Schur(G_s_half,G_splus1_half,F);
+    B_Schur:=LinearCode(G_Schur);
+    H_Schur:=ParityCheckMatrix(B_Schur);
+    W:=VectorSpace(B_splus1_half);
+    for j in {1..(Nrows(G))} do
+        b:=DiagonalMatrix(F,ElementToSequence(G[j]));
+        K:=b*(Transpose(H_Schur));
+        L:=Kernel(K);
+        W:=W meet L;
+    end for;
+    J:=Matrix(Basis(W));
+    B_s:=LinearCode(J);   
+    return B_s;
+end function;
+
+function ECP_alt(G,F,t)
+    // This is an alternative function to ECP,
+    // it also computes the linear codes B_(t+g) and B_(t+g+1)
+    // Input: generator matrix G, error correcting capacity t, base field F
+    // Output: the linear codes B_tg, B_tgplus
+    G_2:=Schur(G,G,F);
+    k_1:=Nrows(G);
+    k_2:=Nrows(G_2);
+    n:=Ncols(G);
+    m:=k_2-k_1;
+    g:=k_2-2*k_1+1;
+    B_0:=LinearCode(G);
+    B_1:=find_B1(G,F);
+    b:=Floor(Log(2,n))+1;
+    list_index:=[0,1];
+    list_codes:=[B_0,B_1];
+    L:=SetToSequence({1..(b-2)});
+    Reverse(~L);
+    for s in L do
+        // use auxiliary function ECP_alt_aux
+        S:=Floor((t+g)/(2^(s-1)));
+        if Index(list_index, S) eq 0 then
+            s_1:=Floor(((t+g)/(2^(s-1))+1)/2);
+            s_2:=Floor((t+g)/(2^s));
+            i_1:=Index(list_index, s_1);
+            i_2:=Index(list_index,s_2);
+            B_tg:=ECP_alt_aux(F,G,list_codes[i_2],list_codes[i_1]);
+            Append(~list_index, S);
+            Append(~list_codes, B_tg);
+        end if;
+        // same again for g+t+1
+        S:=Floor((t+g)/(2^(s-1))+1);
+        if Index(list_index, S) eq 0 then
+            s_1:=Floor(((t+g)/(2^(s-1))+2)/2);
+            s_2:=Floor(((t+g)/(2^(s-1))+1)/2);
+            i_1:=Index(list_index, s_1);
+            i_2:=Index(list_index,s_2);
+            B_tgplus:=ECP_alt_aux(F,G,list_codes[i_2],list_codes[i_1]);
+            Append(~list_index, S);
+            Append(~list_codes, B_tgplus);
+        end if;
+    end for;
+    return B_tg, B_tgplus;
+end function;
+
+function nondeg(B_tg,B_tgplus)
+    // computes the nondegenerate code from the degenrate one
+    // Input: linear codes B_tg, B_tgplus
+    // Output: the generator matrix H of a nondegenerate code
+    G:=GeneratorMatrix(B_tg);
+    M:=0;
+    for i in {1..Nrows(G)} do
+        if G[i] notin VectorSpace(B_tgplus) then
+            M:=M+1;
+            break;
+        end if;
+    end for;
+    H:=GeneratorMatrix(B_tgplus);
+    v:=G[M];
+    v[1]:=1;
+    VerticalJoin(~H,v);
+    return H;
+end function;
+
+function pair(F,B,G)
+    // computes the corresponding pair A to B
+    // Input: base field F, generator matrices G, B
+    // Output: the pair A,B which are generaor matrices of an ECP
+    C:=LinearCode(G);
+    H:=ParityCheckMatrix(C);
+    S:=Schur(B,H,F);
+    D:=LinearCode(S);
+    A:=ParityCheckMatrix(D);
+    return A,B;
+end function;
+
+function ECP_decode(H,A,B,F,t,r)
+    // This function uses ECP decoding to correct errors in some vector r
+    // Input: a parity check matrix H, base field F
+    // generator matrices A,B of an ECP corresponding to H
+    // error correcting capacity t, a vector r with errors
+    // Output: the closest codeword r-x to r or an error message if not applicable
+    n:=Ncols(H);
+    m:=Nrows(B);
+    l:=Nrows(A);
+    S:=ZeroMatrix(F,m,l);
+    for i in {1..m} do
+        for j in {1..l} do
+            S[i,j]:=DotProduct((A[j]*B[i]),r);
+        end for;
+    end for;
+    S:=Transpose(S);
+    K:=Kernel(S);
+    K:=Basis(K);
+    a:=Matrix(Vector(K[1]));
+    a:=Vector(a*A);
+    J:={};
+    for j in {1..n} do
+        if a[j] eq 0 then
+            J:= J join {j};
+        end if;
+    end for;
+    s:=#J;
+    A1:=AffineSpace(F,s);
+    X:=[];
+    Append(~X, A1.1);
+    Remove(~X,1);
+    i:=1;
+    for j in {1..n} do
+        if j in J then
+            Append(~X,A1.i);
+            i:=i+1;
+        else Append(~X,0);
+        end if;
+    end for;
+    X:=Vector(X);
+    R:=Vector(H*Transpose(Matrix(r)));
+    Y:=[];
+    for i in {1..Nrows(H)} do
+        L:=InnerProduct(H[i],X)-R[i];
+        Append(~Y,L);
+    end for;
+    I:=Ideal(Y);
+    V:=Variety(I);
+    v:=V[1];
+    x:=Vector(ZeroMatrix(F,1,n));
+    i:=1;
+    for j in {1..n} do
+        if j in J then
+            x[j]:=v[i];
+            i:=i+1;
+        end if;
+    end for;
+    if Weight(x) le t then
+        return (r-x);
+    else return "Something went wrong";
+    end if;
+end function;
+
+function retrieve_message(G,c,F)
+    // basic message recovery of a codeword
+    // Input: generator matrix G, base field F, codeword c
+    // Output: the preimage M of r under or an error message if not applicable
+    n:=Ncols(G);
+    k:=Nrows(G);
+    A1:=AffineSpace(F,k);
+    X:=[];
+    for i in {1..k} do
+        Append(~X,A1.i);
+    end for;
+    X:=Vector(X);
+    G:=Transpose(G);
+    Y:=[];
+    for i in {1..n} do
+        L:=InnerProduct(X,G[i])-c[i];
+        Append(~Y,L);
+    end for;
+    I:=Ideal(Y);
+    V:=Variety(I);
+    v:=V[1];
+    M:=Vector(ZeroMatrix(F,1,k));
+    for j in {1..k} do
+        M[j]:=v[j];
+    end for;
+    if #V eq 1 then
+        return M;
+    else return "Something went wrong";
+    end if;
+end function;
+
+function Full_Attack(G,F,t,R)
+    // combines all steps to run the full attack
+    // Input: generator matrix G, base field F,
+    // error correcting capacity t, a vector R with errors to be corrected
+    // Output: the preimage M of R under G, an ECP A,B for G
+    C:=LinearCode(G);
+    H:=ParityCheckMatrix(C);
+    // two different algorithms, can use either ECP or ECP_alt
+    //B_tg, B_tgplus:=ECP(H,F,t);
+    B_tg, B_tgplus:=ECP_alt(H,F,t);
+    U:=nondeg(B_tg,B_tgplus);
+    A,B:=pair(F,U,H);
+    c:=ECP_decode(H,A,B,F,t,R);
+    M:=retrieve_message(G,c,F);
+    return M,A,B; // A,B can be reused for any R
+end function;
+
+function generate_example(r,m)
+    // generates a simple example based on Hermitian curves
+    // Input: a prime power r and integer m=deg(E)
+    // Output: generator matrix G, field F, a vector R with some error e,
+    // error correcting capacity t and original message M
+    g:=((r-1)*r) div 2;
+    d:=m-2*g+2;
+    t:=(d-g-1) div 2;
+    n:=r^3;
+    k:=n-(m-g+1);
+    F<a>:=GF(r^2);
+    P2<x,y,z> := ProjectiveSpace(F, 2);
+    f:=y^r*z+y*z^r-x^(r+1);
+    X:=Curve(P2,f);
+    pls:=Places(X,1);
+    p:=X ! [0,1,0];
+    P:=Places(p);
+    O:=P[1];
+    Exclude(~pls, O);
+    E:=m*(DivisorGroup(X)!O);
+    C:=AlgebraicGeometricCode(pls,E);
+    G:=ParityCheckMatrix(C);
+    C:=LinearCode(G);
+    V:=VectorSpace(F,k);
+    M:=Random(V);
+    c:=M*G;
+    e:=Vector(ZeroMatrix(F,1,n));
+    L:={1..n};
+    for i in {1..t} do
+        l:=Random(L);
+        Exclude(~L,l);
+        a:=Random(F);
+        e[l]:=a;
+    end for;
+    R:=c+e;
+    return G,F,R,t,M;
+end function;
+
+
+
+
+// The following code generates an example with r=7 and m=170
+// Other examples are also possible as long as the conditions on m are satisfied
+// The attack also works for other curves than Hermitian curves
+r:=7;
+m:=170;
+G,F,R,t,M:=generate_example(r,m); // message and error are random
+N,A,B:=Full_Attack(G,F,t,R);
+if N eq M then
+    print("The message was recovered successfully!");
+    else print("Oops, something went wrong.");
+end if;
